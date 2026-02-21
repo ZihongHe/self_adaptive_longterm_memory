@@ -1,1 +1,1 @@
-# Self-adaptive-Long-term-Memory-SALM-
+# Self-adaptive Longterm Memory (SALM)
