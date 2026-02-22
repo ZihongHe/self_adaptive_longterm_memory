@@ -66,7 +66,7 @@ class EnhancedParametricMemory:
     """Enhanced parametric memory system with memory optimization."""
     
     def __init__(self, 
-                 base_model_name: str = "/home/pj/Desktop/models/Meta-Llama-3-8B-Instruct",
+                 base_model_name: str = "model/Meta-Llama-3-8B-Instruct",
                  lora_rank: int = 8,
                  lora_alpha: int = 16,
                  lora_dropout: float = 0.1,

@@ -1201,7 +1201,7 @@ def run_multi_session_multi_branch_experiment(
     print("🚀 Starting multi-session multi-branch experiment with forgetting adaptor...")
     log_memory_usage("Start")
     
-    model_name = "/home/pj/Desktop/models/Meta-Llama-3-8B-Instruct"
+    model_name = "model/Meta-Llama-3-8B-Instruct"
     
     tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
     
@@ -1610,7 +1610,7 @@ if __name__ == "__main__":
         print(f"📁 Results directory: {results_dir}")
         
         print("📂 Loading data...")
-        data_list = load_longmem_json("data/longmemeval_s_cleaned.json")[:num_samples]
+        data_list = load_longmem_json("dataset/longmemeval_s_cleaned.json")[:num_samples]
         print(f"📊 Loaded {len(data_list)} samples (config: {num_samples} samples)")
         log_memory_usage("After loading data")
         
