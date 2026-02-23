@@ -17,9 +17,22 @@ import gc
 import time
 from datetime import datetime
 
-from utils import args, load_longmem_json, compute_forgetting_quality, compute_target_logits_accuracy_with_model, evaluate_non_parametric_storage_decision, CumulativeAverager, MultiRepeatCumulativeAverager, IF_NO_PARAMETRIC, IF_NO_NON_PARAMETRIC, experiment_config_str, extract_conversation_text, get_optimized_temperature, PromptBuilder, NUM_SAMPLES, FeatureExtractor, EnhancedRewardTransformer, ConversationDataset, collate_fn, log_memory_usage, save_repeat_raw_stats_to_file
+from utils import (
+    args, load_longmem_json, compute_forgetting_quality,
+    compute_target_logits_accuracy_with_model, evaluate_non_parametric_storage_decision,
+    CumulativeAverager, MultiRepeatCumulativeAverager,
+    IF_NO_PARAMETRIC, IF_NO_NON_PARAMETRIC, experiment_config_str,
+    extract_conversation_text, get_optimized_temperature, PromptBuilder,
+    NUM_SAMPLES, FeatureExtractor, EnhancedRewardTransformer,
+    ConversationDataset, collate_fn, log_memory_usage, save_repeat_raw_stats_to_file,
+    NO_STORAGE_ADAPTER, NO_RETRIEVAL_ADAPTER, NO_FORGETTING_ADAPTER   # <-- New imports
+)
 from adaptors import EnhancedHierarchicalMemoryAdaptor, ForgettingAdaptor
-from tree import MultiBranchDecisionTreeNode, create_default_retrieval_decision, smart_align_nodes_and_decisions, align_all_decisions
+from tree import (
+    MultiBranchDecisionTreeNode, create_default_retrieval_decision,
+    smart_align_nodes_and_decisions, align_all_decisions, create_default_storage_decision,
+    create_default_forgetting_decision
+)
 from memory import LoRAModelLoader, EnhancedParametricMemory
 
 def process_sessions_with_multi_branch_map_expansion_with_limit(
@@ -160,13 +173,65 @@ def process_sessions_with_multi_branch_map_expansion_with_limit(
             
             temperature = base_temperature * (1.0 - i / max(len(sessions), 1))
             
-            storage_decisions, storage_decision_nodes = storage_adaptor.execute_storage_decisions_with_map(
-                param_memory,
-                features_list,
-                conversation_texts,
-                temperature,
-                current_nodes
-            )
+            # ----- Storage Phase -----
+            if not NO_STORAGE_ADAPTER:
+                storage_decisions, storage_decision_nodes = storage_adaptor.execute_storage_decisions_with_map(
+                    param_memory,
+                    features_list,
+                    conversation_texts,
+                    temperature,
+                    current_nodes
+                )
+            else:
+                # Fixed storage: always store to both memories
+                storage_decisions = []
+                storage_decision_nodes = current_nodes  # No new nodes, use current nodes as placeholders
+                for idx, node in enumerate(current_nodes):
+                    # Non-parametric storage
+                    if not IF_NO_NON_PARAMETRIC:
+                        truncated_text = conversation_text[:200]  # as in original code
+                        if node.non_parametric_memory_state is None:
+                            node.non_parametric_memory_state = []
+                        node.non_parametric_memory_state.append(truncated_text)
+                    
+                    # Parametric storage
+                    selected_adapter = None
+                    if not IF_NO_PARAMETRIC:
+                        # Try to get existing adapter for this branch/path
+                        selected_adapter = param_memory.select_best_adapter_for_storage(
+                            conversation_text, node.path_id, node.branch_idx
+                        )
+                        if selected_adapter is None and param_memory.can_create_adapter():
+                            selected_adapter = param_memory.create_adapter(
+                                path_id=node.path_id, branch_idx=node.branch_idx
+                            )
+                        if selected_adapter:
+                            training_result = param_memory.write_to_adapter(conversation_text, selected_adapter)
+                    
+                    # Build decision dict (mimic original format)
+                    decision = {
+                        "store": True,
+                        "use_existing": selected_adapter is not None and param_memory.adapters[selected_adapter].get("trained", False),
+                        "create_new": selected_adapter is not None and not param_memory.adapters[selected_adapter].get("trained", False),
+                        "selected_adapter": selected_adapter,
+                        "store_to_non_parametric": not IF_NO_NON_PARAMETRIC,
+                        "non_parametric_reason": "fixed_no_adapter",
+                        "store_non_parametric_probability": 1.0 if not IF_NO_NON_PARAMETRIC else 0.0,
+                        "store_non_parametric_log_prob": 0.0,
+                        "reason": "fixed_storage_no_adapter",
+                        "log_prob": 0.0,
+                        "store_probability": 1.0,
+                        "path_id": node.path_id,
+                        "branch_idx": node.branch_idx,
+                        "session_idx": node.session_idx,
+                        "merge_count": node.merge_count,
+                        "storage_to_non_parametric": not IF_NO_NON_PARAMETRIC,
+                        "non_parametric_memory_usage": len(node.non_parametric_memory_state or []) / 20.0 if node.non_parametric_memory_state else 0.0,
+                        "training_performed": selected_adapter is not None,
+                        "training_loss": training_result.get("average_loss", 0.0) if selected_adapter and isinstance(training_result, dict) else 0.0,
+                        "stable_id": node.stable_id,
+                    }
+                    storage_decisions.append(decision)
             
             if not storage_decisions or not storage_decision_nodes:
                 continue
@@ -174,6 +239,7 @@ def process_sessions_with_multi_branch_map_expansion_with_limit(
             all_storage_decisions.extend(storage_decisions)
             all_decision_nodes.extend(storage_decision_nodes)
             
+            # ----- Forgetting Phase -----
             forgetting_features_list = []
             forgetting_conversation_texts = []
             
@@ -197,13 +263,22 @@ def process_sessions_with_multi_branch_map_expansion_with_limit(
                 forgetting_features_list.append(features)
                 forgetting_conversation_texts.append(conversation_text)
             
-            forgetting_decisions, forgetting_decision_nodes = forgetting_adaptor.execute_forgetting_decisions_with_map(
-                param_memory,
-                forgetting_features_list,
-                forgetting_conversation_texts,
-                temperature,
-                forgetting_current_nodes
-            )
+            if not NO_FORGETTING_ADAPTER:
+                forgetting_decisions, forgetting_decision_nodes = forgetting_adaptor.execute_forgetting_decisions_with_map(
+                    param_memory,
+                    forgetting_features_list,
+                    forgetting_conversation_texts,
+                    temperature,
+                    forgetting_current_nodes
+                )
+            else:
+                # Fixed forgetting: never forget
+                forgetting_decisions = []
+                forgetting_decision_nodes = forgetting_current_nodes  # No new nodes
+                for node in forgetting_current_nodes:
+                    decision = create_default_forgetting_decision(node)
+                    decision["reason"] = "fixed_no_forgetting"
+                    forgetting_decisions.append(decision)
             
             if not forgetting_decisions or not forgetting_decision_nodes:
                 continue
@@ -280,13 +355,73 @@ def enhanced_multi_branch_retrieval_with_map_expansion(
         features_list.append(features)
         query_texts.append(query_text)
     
-    retrieval_decisions, nll_adjustments, decision_nodes = retrieval_adaptor.execute_retrieval_decisions_with_map(
-        param_memory,
-        features_list,
-        query_texts,
-        temperature,
-        current_nodes
-    )
+    # ----- Retrieval Phase -----
+    if not NO_RETRIEVAL_ADAPTER:
+        retrieval_decisions, nll_adjustments, decision_nodes = retrieval_adaptor.execute_retrieval_decisions_with_map(
+            param_memory,
+            features_list,
+            query_texts,
+            temperature,
+            current_nodes
+        )
+    else:
+        # Fixed retrieval: use all non-parametric memories (truncated 500 chars) and select adapter with most data
+        retrieval_decisions = []
+        nll_adjustments = []
+        decision_nodes = current_nodes  # No new nodes
+        
+        for idx, node in enumerate(current_nodes):
+            # Non-parametric context: all memories, truncated to 500 chars each
+            non_parametric_context = []
+            if node.non_parametric_memory_state and not IF_NO_NON_PARAMETRIC:
+                for mem in node.non_parametric_memory_state:
+                    mem_str = str(mem)
+                    if len(mem_str) > 500:
+                        mem_str = mem_str[:500] + "..."
+                    non_parametric_context.append(mem_str)
+            
+            # Parametric selection: choose adapter with most training samples
+            selected_adapter = None
+            adapter_index = -1
+            if not IF_NO_PARAMETRIC:
+                # Get adapters associated with this path/branch
+                if node.path_id and node.path_id in param_memory.path_adapters:
+                    adapter_names = param_memory.path_adapters[node.path_id]
+                else:
+                    adapter_names = param_memory.current_iteration_adapters
+                
+                # Filter deleted adapters
+                valid_adapters = [name for name in adapter_names if name in param_memory.adapters and not param_memory.adapters[name].get("deleted", False)]
+                
+                if valid_adapters:
+                    # Select adapter with largest total training samples
+                    best_samples = -1
+                    for i, name in enumerate(valid_adapters):
+                        samples = param_memory.adapters[name]["training_stats"].get("total_training_samples", 0)
+                        if samples > best_samples:
+                            best_samples = samples
+                            selected_adapter = name
+                            adapter_index = i
+            
+            decision = {
+                "use_parametric": selected_adapter is not None and not IF_NO_PARAMETRIC,
+                "selected_adapter": selected_adapter,
+                "adapter_index": adapter_index,
+                "reason": "fixed_no_adapter",
+                "log_prob": 0.0,
+                "use_probability": 1.0 if selected_adapter is not None else 0.0,
+                "nll_influence": 0.0,
+                "path_id": node.path_id,
+                "branch_idx": node.branch_idx,
+                "session_idx": node.session_idx,
+                "non_parametric_context": non_parametric_context,
+                "non_param_relevance_scores": [1.0] * len(non_parametric_context) if non_parametric_context else [],
+                "non_param_decision_log_probs": [0.0] * len(non_parametric_context) if non_parametric_context else [],
+                "merge_count": node.merge_count,
+                "stable_id": node.stable_id,
+            }
+            retrieval_decisions.append(decision)
+            nll_adjustments.append(0.0)
     
     if not retrieval_decisions or not decision_nodes:
         return retrieval_decisions, nll_adjustments, decision_nodes
@@ -954,6 +1089,7 @@ def update_enhanced_adaptors_with_all_branches(
         "num_branches": len(total_rewards),
     }
     
+    # If an adaptor is disabled, its loss will be zero (no history)
     storage_loss = storage_adaptor.compute_reinforce_loss(use_all_branches=use_all_branches)
     retrieval_loss = retrieval_adaptor.compute_reinforce_loss(use_all_branches=use_all_branches)
     forgetting_loss = forgetting_adaptor.compute_reinforce_loss(use_all_branches=use_all_branches)
@@ -1136,6 +1272,9 @@ def compute_final_experiment_stats(
         "control_variables": {
             "if_no_parametric": IF_NO_PARAMETRIC,
             "if_no_non_parametric": IF_NO_NON_PARAMETRIC,
+            "no_storage_adapter": NO_STORAGE_ADAPTER,
+            "no_retrieval_adapter": NO_RETRIEVAL_ADAPTER,
+            "no_forgetting_adapter": NO_FORGETTING_ADAPTER,
             "num_samples": NUM_SAMPLES,
         },
     }

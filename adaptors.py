@@ -15,7 +15,7 @@ import time
 import hashlib
 
 from tree import MultiBranchDecisionTreeNode, MultiBranchDecisionTree, create_default_retrieval_decision, smart_align_nodes_and_decisions, create_default_storage_decision, create_default_forgetting_decision
-from utils import gumbel_sigmoid, gumbel_softmax, IF_NO_PARAMETRIC, IF_NO_NON_PARAMETRIC
+from utils import gumbel_sigmoid, gumbel_softmax, IF_NO_PARAMETRIC, IF_NO_NON_PARAMETRIC, NO_STORAGE_ADAPTER, NO_RETRIEVAL_ADAPTER, NO_FORGETTING_ADAPTER
 
 class EnhancedHierarchicalMemoryAdaptor(torch.nn.Module):
     """Enhanced hierarchical memory adaptor following MAP expansion principle with branch limits and merging."""

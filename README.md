@@ -95,6 +95,9 @@ The framework supports extensive configuration through command-line arguments. B
 | `--max_branches` | int | 20 | Maximum number of parallel decision branches |
 | `--merge_similarity_threshold` | float | 0.9 | Threshold for merging similar branches (0-1) |
 | `--num_samples` | int | 128 | Number of samples to process from dataset |
+| `--no_storage_adapter` | bool | False | Disable learnable storage adapter (always store to both memories) |
+| `--no_retrieval_adapter` | bool | False | Disable learnable retrieval adapter (use all non-parametric memories in context, select LoRA with most data) |
+| `--no_forgetting_adapter` | bool | False | Disable learnable forgetting adapter (never forget any memories) |
 
 ### Usage Examples
 
@@ -116,13 +119,37 @@ python main.py --if_no_parametric True --max_branches 16 --num_samples 100
 ```
 *Disables parametric memory to evaluate non-parametric memory effectiveness.*
 
-#### 4. **High Branch Exploration**
+#### 4. **Fixed Storage Policy** (no learnable storage adapter)
+```bash
+python main.py --no_storage_adapter True --num_samples 64
+```
+*Always stores every session to both parametric and non-parametric memory without adaptive decisions.*
+
+#### 5. **Fixed Retrieval Policy** (no learnable retrieval adapter)
+```bash
+python main.py --no_retrieval_adapter True --num_samples 64
+```
+*Always uses all non-parametric memories (truncated to 500 chars) and selects LoRA with most training data.*
+
+#### 6. **Fixed Forgetting Policy** (no learnable forgetting adapter)
+```bash
+python main.py --no_forgetting_adapter True --num_samples 64
+```
+*Never forgets any parametric or non-parametric memories during session iteration.*
+
+#### 7. **Fully Fixed Policy** (no learnable adapters)
+```bash
+python main.py --no_storage_adapter True --no_retrieval_adapter True --no_forgetting_adapter True --num_samples 64
+```
+*Disables all three adaptive mechanisms for baseline comparison.*
+
+#### 8. **High Branch Exploration**
 ```bash
 python main.py --max_branches 64 --merge_similarity_threshold 0.8 --num_repeat 2
 ```
 *Explores more branches (64) with lower merge threshold (0.8) for broader decision space.*
 
-#### 5. **Fast Testing**
+#### 9. **Fast Testing**
 ```bash
 python main.py --num_samples 10 --max_branches 8 --num_repeat 1
 ```
@@ -140,6 +167,14 @@ results/multi_session_multi_branch_with_forgetting_YYYYMMDD_HHMMSS_repeatN_all_b
 ├── experiment_stats.json      # Cross-repeat aggregated results
 └── console_output.log         # Complete execution log
 ```
+
+The experiment configuration string in the directory name encodes all control flags:
+- `np0/1`: IF_NO_PARAMETRIC setting
+- `nnp0/1`: IF_NO_NON_PARAMETRIC setting  
+- `ns0/1`: NO_STORAGE_ADAPTER setting
+- `nr0/1`: NO_RETRIEVAL_ADAPTER setting
+- `nf0/1`: NO_FORGETTING_ADAPTER setting
+- `samplesN`: Number of samples processed
 
 ## 📚 Citation
 

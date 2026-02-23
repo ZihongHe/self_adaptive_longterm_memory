@@ -25,6 +25,11 @@ import psutil
 IF_NO_PARAMETRIC = False
 IF_NO_NON_PARAMETRIC = False
 
+# New control flags for disabling specific adaptors
+NO_STORAGE_ADAPTER = False
+NO_RETRIEVAL_ADAPTER = False
+NO_FORGETTING_ADAPTER = False
+
 parser = argparse.ArgumentParser(description='Run multi-branch memory experiment')
 parser.add_argument('--if_no_parametric', type=lambda x: (str(x).lower() == 'true'), 
                     default=IF_NO_PARAMETRIC, help='Disable parametric memory')
@@ -34,23 +39,39 @@ parser.add_argument('--num_repeat', type=int, default=4, help='Number of experim
 parser.add_argument('--max_branches', type=int, default=20, help='Maximum number of branches')
 parser.add_argument('--merge_similarity_threshold', type=float, default=0.9, help='Threshold for branch merging')
 parser.add_argument('--num_samples', type=int, default=128, help='Number of samples to load from dataset')
+parser.add_argument('--no_storage_adapter', type=lambda x: (str(x).lower() == 'true'), default=False,
+                    help='Disable storage adapter: always store to both memories')
+parser.add_argument('--no_retrieval_adapter', type=lambda x: (str(x).lower() == 'true'), default=False,
+                    help='Disable retrieval adapter: use all non-parametric memories in context (truncated 500 chars) '
+                         'and select parametric adapter with most data')
+parser.add_argument('--no_forgetting_adapter', type=lambda x: (str(x).lower() == 'true'), default=False,
+                    help='Disable forgetting adapter: never forget anything')
 
 args = parser.parse_args()
 
 IF_NO_PARAMETRIC = args.if_no_parametric
 IF_NO_NON_PARAMETRIC = args.if_no_non_parametric
 NUM_SAMPLES = args.num_samples
+NO_STORAGE_ADAPTER = args.no_storage_adapter
+NO_RETRIEVAL_ADAPTER = args.no_retrieval_adapter
+NO_FORGETTING_ADAPTER = args.no_forgetting_adapter
 
 print("\n" + "="*80)
 print("Control experiment configuration:")
 print(f"IF_NO_PARAMETRIC: {IF_NO_PARAMETRIC} - Disable parametric memory")
 print(f"IF_NO_NON_PARAMETRIC: {IF_NO_NON_PARAMETRIC} - Disable non-parametric memory")
+print(f"NO_STORAGE_ADAPTER: {NO_STORAGE_ADAPTER} - Disable storage adapter (fixed always-store)")
+print(f"NO_RETRIEVAL_ADAPTER: {NO_RETRIEVAL_ADAPTER} - Disable retrieval adapter (fixed retrieval)")
+print(f"NO_FORGETTING_ADAPTER: {NO_FORGETTING_ADAPTER} - Disable forgetting adapter (never forget)")
 print(f"NUM_SAMPLES: {NUM_SAMPLES} - Number of samples to process")
 print("="*80 + "\n")
 
 experiment_config_str = (
     f"np{int(IF_NO_PARAMETRIC)}_"
     f"nnp{int(IF_NO_NON_PARAMETRIC)}_"
+    f"ns{int(NO_STORAGE_ADAPTER)}_"
+    f"nr{int(NO_RETRIEVAL_ADAPTER)}_"
+    f"nf{int(NO_FORGETTING_ADAPTER)}_"
     f"samples{NUM_SAMPLES}"
 )
 
@@ -1355,4 +1376,3 @@ def save_repeat_raw_stats_to_file(repeat_stat: Dict[str, Any], results_dir: str,
     print(f"💾 Saved repeat {repeat_idx} raw stats to {raw_file}")
     
     return simplified_stat
-
